@@ -1,4 +1,12 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/apex_logo_dark.png">
+    <img alt="Wapex Logo" src="docs/assets/images/apex_logo.png" width="160">
+  </picture>
+</p>
+
 # Wapex (WIP) 🚀
+
 
 > **Wapex** is a premium, high-performance WhatsApp desktop companion built with **Tauri 2** and **Rust**. It is designed for power users who need to manage multiple accounts seamlessly within a single, unified, and productivity-focused workspace.
 
@@ -79,7 +87,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## 🤝 Contributing
 
-We welcome contributions! Please check out the [roadmap](docs/implementation_plan.md) to see what we're working on. Issues and Pull Requests are welcome.
+We welcome contributions! Please check out our [Contributing Guidelines](CONTRIBUTING.md) and the [Roadmap](docs/implementation_plan.md) to see what we're working on. Issues and Pull Requests are welcome.
 
 ---
 
