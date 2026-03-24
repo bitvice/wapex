@@ -28,6 +28,20 @@ pub fn delete_account(manager: State<'_, AccountManager>, id: String) -> Result<
     manager.delete_account(&id).map_err(|e| e.to_string())
 }
 
+/// Receive unread count
+#[tauri::command]
+pub fn update_unread_count(count: u32) {
+    println!("Unread count updated: {}", count);
+    // Future: Use AppHandle to emit an aggregate unread count or set tray badge
+}
+
+/// Proxy Notification from Webview to Native OS
+#[tauri::command]
+pub fn proxy_notification(title: String, body: String) {
+    println!("Notification via Bridge - {}: {}", title, body);
+    // Future: Trigger tauri::notification API
+}
+
 /// Spawns a webview for the specific account using isolated data directory.
 #[tauri::command]
 pub fn spawn_account_webview(app: AppHandle, account: Account) -> Result<(), String> {
@@ -39,6 +53,7 @@ pub fn spawn_account_webview(app: AppHandle, account: Account) -> Result<(), Str
         let _ = std::fs::create_dir_all(&account_dir);
         
         let label = format!("whatsapp_{}", account.id.replace("-", "_"));
+        let bridge_script = include_str!("../../../static/bridge.js");
         
         // Spawn webview with unique data dir
         let _webview = WebviewWindowBuilder::new(
@@ -47,6 +62,7 @@ pub fn spawn_account_webview(app: AppHandle, account: Account) -> Result<(), Str
             tauri::WebviewUrl::External("https://web.whatsapp.com".parse().unwrap())
         )
         .title(&account.name)
+        .initialization_script(bridge_script)
         .data_directory(account_dir)
         .build()
         .map_err(|e| e.to_string())?;

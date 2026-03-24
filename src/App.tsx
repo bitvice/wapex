@@ -1,48 +1,81 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
+import "./index.css";
+
+interface Account {
+  id: string;
+  name: string;
+  color_code: string;
+  workspace_id: string | null;
+}
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [name, setName] = useState("");
 
-  function greet() {
-    setGreetMsg(`Welcome to Wapex. Accounts initialized.`);
+  useEffect(() => {
+    loadAccounts();
+  }, []);
+
+  async function loadAccounts() {
+    try {
+      const data = await invoke<Account[]>("get_accounts");
+      setAccounts(data);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function handleAddAccount() {
+    if (!name) return;
+    try {
+      await invoke("add_account", {
+        name,
+        colorCode: "#00FF00",
+        workspaceId: null
+      });
+      setName("");
+      loadAccounts();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function handleSpawnAccount(account: Account) {
+    try {
+      await invoke("spawn_account_webview", { account });
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
+    <main className="container border rounded p-4 mx-auto max-w-lg mt-10">
+      <h1 className="text-2xl font-bold mb-4">Wapex Accounts</h1>
+      
+      <div className="flex gap-2 mb-4">
         <input
-          id="greet-input"
+          className="border p-2 rounded"
+          value={name}
           onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+          placeholder="New account name..."
         />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+        <button onClick={handleAddAccount} className="bg-primary text-primary-foreground p-2 rounded">
+          Add
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {accounts.map(acc => (
+          <div key={acc.id} className="border p-2 rounded flex justify-between">
+            <span>{acc.name}</span>
+            <button onClick={() => handleSpawnAccount(acc)} className="underline text-blue-500">
+              Launch Webview
+            </button>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }
