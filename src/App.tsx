@@ -3,26 +3,68 @@ import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 import "./index.css";
 import { Sidebar, type Account } from "./components/Sidebar";
+import { Viewport } from "./components/Viewport";
+import { Dashboard } from "./components/Dashboard";
+import { CommandPalette } from "./components/CommandPalette";
+import { TitleBar } from "./components/TitleBar";
+import { SettingsDialog } from "./components/SettingsDialog";
+import { NotificationToast } from "./components/NotificationToast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
+import { usePrivacyBlur } from "./hooks/usePrivacyBlur";
+import { useSmartHibernation } from "./hooks/useSmartHibernation";
+import { useSettings } from "./hooks/useSettings";
+import { useUnreadCounts } from "./hooks/useUnreadCounts";
 
 function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const activeAccount = accounts.find(a => a.id === activeAccountId);
+
+  // Settings
+  const { sidebarPosition } = useSettings();
+
+  // Unread counts per account
+  const { unreadCounts } = useUnreadCounts();
+
+  // Privacy Blur: blur content when window loses focus
+  const { isBlurred, isEnabled: privacyEnabled, setIsEnabled: setPrivacyEnabled } = usePrivacyBlur();
+
+  // Smart Hibernation: auto-destroy idle webviews
+  const [hibernationEnabled, setHibernationEnabled] = useState(true);
+  useSmartHibernation(activeAccountId, hibernationEnabled);
+
+  // Hibernate all handler for command palette
+  async function handleHibernateAll() {
+    if (!activeAccountId) return;
+    const activeLabel = `whatsapp_${activeAccountId.replace(/-/g, "_")}`;
+    try {
+      const result = await invoke<string[]>("hibernate_all", { activeLabel });
+      console.log(`Hibernated ${result.length} webview(s)`);
+    } catch (e) { console.error(e); }
+  }
 
   useEffect(() => {
     loadAccounts();
-    // In actual implementation, we'd also listen to Tauri unread-count events here
   }, []);
+
+  // Hide all WhatsApp windows when returning to the dashboard
+  useEffect(() => {
+    if (!activeAccountId) {
+      invoke("hide_all_webviews").catch(console.error);
+    }
+  }, [activeAccountId]);
 
   async function loadAccounts() {
     try {
       const data = await invoke<Account[]>("get_accounts");
-      // For demo, just mock an unread badge on the first element if any
-      if (data.length > 0) {
-        data[0].unreadCount = 2;
-        if (!activeAccountId) setActiveAccountId(data[0].id);
-      }
       setAccounts(data);
+      if (data.length > 0 && !activeAccountId) {
+        setActiveAccountId(data[0].id);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -31,9 +73,12 @@ function App() {
   async function handleAddAccount() {
     if (!name.trim()) return;
     try {
+      const colors = ["#25D366", "#075E54", "#34B7F1", "#ECE5DD", "#00A884"];
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      
       await invoke("add_account", {
         name,
-        colorCode: "hsl(var(--primary))", // Fallback generated theme color
+        colorCode: color,
         workspaceId: null
       });
       setName("");
@@ -43,75 +88,95 @@ function App() {
     }
   }
 
-  async function handleLaunchAccount() {
-    const account = accounts.find(a => a.id === activeAccountId);
-    if (!account) return;
-    try {
-      await invoke("spawn_account_webview", { account });
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  const activeAccount = accounts.find(a => a.id === activeAccountId);
-
   return (
-    <div className="flex h-screen w-full bg-background overflow-hidden font-sans">
+    <div className="flex flex-col h-screen w-full bg-background overflow-hidden font-sans">
+      <TitleBar />
+
+      <div className={`flex flex-1 overflow-hidden ${sidebarPosition === 'right' ? 'flex-row-reverse' : ''}`}>
+      {/* Global Command Palette (Ctrl+K / Cmd+K) */}
+      <CommandPalette
+        accounts={accounts}
+        onSelectAccount={setActiveAccountId}
+        onAddAccount={() => setAddDialogOpen(true)}
+        onSettings={() => setSettingsOpen(true)}
+        onHibernateAll={handleHibernateAll}
+        onTogglePrivacy={() => setPrivacyEnabled(p => !p)}
+        privacyEnabled={privacyEnabled}
+      />
+
+      {/* Add Account Dialog */}
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add WhatsApp Account</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <input
+              className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={name}
+              onChange={(e) => setName(e.currentTarget.value)}
+              placeholder="Account name (e.g. Main Office)"
+              onKeyDown={(e) => { if (e.key === 'Enter') { handleAddAccount(); setAddDialogOpen(false); } }}
+              autoFocus
+            />
+            <button
+              onClick={() => { handleAddAccount(); setAddDialogOpen(false); }}
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-10 px-4 py-2 w-full"
+            >
+              Create Account
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Sidebar 
         accounts={accounts}
         activeAccountId={activeAccountId}
         onSelectAccount={setActiveAccountId}
-        onSettingsClick={() => console.log("Settings")}
-        onAddAccountClick={() => console.log("Add Acc modal")}
+        onSettingsClick={() => setSettingsOpen(true)}
+        onAddAccountClick={() => setAddDialogOpen(true)}
+        unreadCounts={unreadCounts}
       />
       
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col items-center justify-center p-8 bg-black/5">
-        <h1 className="text-4xl font-extrabold mb-8 text-foreground tracking-tight">Wapex Shell Dashboard</h1>
-        
-        {accounts.length === 0 ? (
-          <div className="w-full max-w-sm rounded-xl border bg-card text-card-foreground shadow-sm p-6 text-center">
-            <h3 className="font-semibold leading-none tracking-tight mb-2 text-xl">No Accounts Added</h3>
-            <p className="text-sm text-muted-foreground mb-6">Create your first WhatsApp integration instance.</p>
-            <div className="flex gap-2">
-              <input
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={name}
-                onChange={(e) => setName(e.currentTarget.value)}
-                placeholder="Ex: Main Office"
-              />
-              <button 
-                onClick={handleAddAccount} 
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2"
-              >
-                Create
-              </button>
-            </div>
-          </div>
+      <main className="flex-1 flex flex-col relative bg-background">
+        {!activeAccount ? (
+          <Dashboard onAddAccount={() => setAddDialogOpen(true)} />
         ) : (
-          <div className="w-full max-w-md rounded-xl border bg-card text-card-foreground shadow-sm p-8">
-             <div className="flex items-center gap-4 mb-8">
-               <div 
-                  className="w-16 h-16 rounded-xl flex items-center justify-center text-white text-2xl font-bold"
-                  style={{ backgroundColor: activeAccount?.color_code || "#000" }}
-               >
-                 {activeAccount?.name.substring(0,2).toUpperCase()}
-               </div>
-               <div>
-                  <h2 className="text-2xl font-semibold">{activeAccount?.name}</h2>
-                  <p className="text-muted-foreground">Session Instance ID: {activeAccount?.id.split("-")[0]}</p>
-               </div>
-             </div>
-             
-             <button 
-                onClick={handleLaunchAccount} 
-                className="w-full inline-flex items-center justify-center rounded-md text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-10 px-4 py-2"
-              >
-                Launch Account Webview
-              </button>
+          <Viewport 
+             activeAccountId={activeAccountId} 
+             account={activeAccount}
+             sidebarPosition={sidebarPosition}
+          />
+        )}
+
+        {/* Privacy Blur Overlay */}
+        {isBlurred && activeAccount && (
+          <div className="absolute inset-0 z-50 backdrop-blur-xl bg-background/60 flex items-center justify-center transition-all duration-300">
+            <div className="text-center">
+              <div className="text-4xl mb-4">🔒</div>
+              <p className="text-lg font-semibold text-foreground">Privacy Mode Active</p>
+              <p className="text-sm text-muted-foreground">Click to focus the window</p>
+            </div>
           </div>
         )}
       </main>
+
+      {/* Settings Dialog */}
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        privacyEnabled={privacyEnabled}
+        onTogglePrivacy={() => setPrivacyEnabled(p => !p)}
+        hibernationEnabled={hibernationEnabled}
+        onToggleHibernation={() => setHibernationEnabled(h => !h)}
+        accounts={accounts}
+        onAccountsChanged={loadAccounts}
+      />
+      </div>
+
+      {/* In-app notification toasts */}
+      <NotificationToast accounts={accounts} />
     </div>
   );
 }

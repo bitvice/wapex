@@ -6,17 +6,11 @@ console.log("Wapex bridge initialized.");
 const observer = new MutationObserver(() => {
   const title = document.title;
   const match = title.match(/^\((\d+)\)/);
-  if (match) {
-    const count = parseInt(match[1], 10);
-    // Safely attempt to notify the Tauri backend
-    if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
-      window.__TAURI_INTERNALS__.invoke("update_unread_count", { count }).catch(e => console.error(e));
-    }
-  } else {
-    // Zero unread
-    if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
-      window.__TAURI_INTERNALS__.invoke("update_unread_count", { count: 0 }).catch(e => console.error(e));
-    }
+  const windowLabel = window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label || "unknown";
+  const count = match ? parseInt(match[1], 10) : 0;
+  
+  if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+    window.__TAURI_INTERNALS__.invoke("update_unread_count", { count, windowLabel }).catch(e => console.error(e));
   }
 });
 
@@ -26,22 +20,27 @@ if (titleElement) {
   observer.observe(titleElement, { subtree: true, characterData: true, childList: true });
 }
 
-// 2. Intercept Notifications to Proxy them to Desktop (MVP level)
+// 2. Intercept Notifications to Proxy them to Desktop + In-app Toast
 const OriginalNotification = window.Notification;
 
 class WapexNotification extends OriginalNotification {
   constructor(title, options) {
+    // Don't call super() to suppress browser notification - we'll show our own toast
     super(title, options);
     
-    // Relay notification info to Tauri
+    // Get the window label from __TAURI_INTERNALS__ metadata
+    const windowLabel = window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label || "unknown";
+
+    // Relay notification info to Tauri for in-app toast
     if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
       window.__TAURI_INTERNALS__.invoke("proxy_notification", {
         title,
-        body: options?.body || ""
+        body: options?.body || "",
+        windowLabel
       }).catch(e => console.error(e));
     }
   }
 }
 
-// Override logic only if Notifications are completely allowed or not yet asked to prevent breaking WA
+// Override logic
 window.Notification = WapexNotification;

@@ -79,4 +79,14 @@ impl AccountManager {
         db.execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
         Ok(())
     }
+
+    /// Update an account's color code
+    pub fn update_account_color(&self, id: &str, color_code: &str) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "UPDATE accounts SET color_code = ?1 WHERE id = ?2",
+            params![color_code, id],
+        )?;
+        Ok(())
+    }
 }

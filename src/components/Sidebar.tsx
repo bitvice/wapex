@@ -7,7 +7,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Settings, MessageCircle } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
 
 export interface Account {
   id: string;
@@ -23,6 +23,7 @@ interface SidebarProps {
   onSelectAccount: (accountId: string) => void;
   onSettingsClick: () => void;
   onAddAccountClick: () => void;
+  unreadCounts: Record<string, number>;
 }
 
 const getInitials = (name: string) => {
@@ -35,16 +36,20 @@ export function Sidebar({
   onSelectAccount,
   onSettingsClick,
   onAddAccountClick,
+  unreadCounts,
 }: SidebarProps) {
   return (
-    <div className="w-16 flex flex-col items-center py-4 bg-card border-r border-border h-screen overflow-hidden">
+    <div className="w-16 shrink-0 flex flex-col items-center py-4 bg-card border-r border-border h-full overflow-hidden">
       {/* App Logo or Main Indicator */}
       <TooltipProvider delayDuration={0}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground mb-4 shadow-sm transition-all duration-200 hover:rounded-xl cursor-default">
-              <MessageCircle size={24} />
-            </div>
+            <button
+              onClick={() => onSelectAccount(null as any)}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl overflow-hidden mb-4 shadow-sm transition-all duration-200 hover:rounded-xl hover:shadow-md cursor-pointer bg-blue-900"
+            >
+              <img src="/images/icon.png" alt="Wapex" className="h-12 w-12 object-cover" />
+            </button>
           </TooltipTrigger>
           <TooltipContent side="right">Wapex Dashboard</TooltipContent>
         </Tooltip>
@@ -82,9 +87,9 @@ export function Sidebar({
                       >
                         {getInitials(account.name)}
                         {/* Unread Badge */}
-                        {(account.unreadCount || 0) > 0 && (
-                          <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground border-2 border-card z-10">
-                            {account.unreadCount}
+                        {(unreadCounts[account.id] || 0) > 0 && (
+                          <div className="absolute -bottom-1 -right-1 flex h-5 min-w-5 px-1 items-center justify-center rounded-full bg-orange-500 text-[10px] font-bold text-white border-2 border-card z-10">
+                            {unreadCounts[account.id]}
                           </div>
                         )}
                       </button>
