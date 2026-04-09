@@ -5,7 +5,7 @@ use crate::storage::AccountManager;
 use tauri::{AppHandle, State, Manager, Emitter, LogicalSize};
 use webview_manager::WebviewManager;
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 pub struct Bounds {
     pub x: f64,
     pub y: f64,
@@ -156,18 +156,15 @@ pub fn spawn_account_webview(
             use tauri::webview::DownloadEvent;
             match event {
                 DownloadEvent::Requested { url, destination } => {
-                    // Get the Downloads folder
                     let downloads_dir = dirs::download_dir()
                         .unwrap_or_else(|| std::env::home_dir().unwrap_or_default().join("Downloads"));
                     let _ = std::fs::create_dir_all(&downloads_dir);
 
-                    // Extract filename from URL or use a default
                     let filename = url.path_segments()
                         .and_then(|segments| segments.last())
                         .and_then(|name| if name.is_empty() { None } else { Some(name.to_string()) })
                         .unwrap_or_else(|| format!("download_{}", chrono::Utc::now().timestamp()));
 
-                    // Avoid overwriting: if the file exists, append a number
                     let mut final_path = downloads_dir.join(&filename);
                     if final_path.exists() {
                         let stem = final_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
@@ -182,7 +179,7 @@ pub fn spawn_account_webview(
 
                     println!("[Download] Saving to: {:?}", final_path);
                     *destination = final_path;
-                    true // allow the download
+                    true
                 }
                 DownloadEvent::Finished { url, path, success } => {
                     println!("[Download] Finished: {} -> {:?} (success: {})", url, path, success);
@@ -202,7 +199,7 @@ pub fn spawn_account_webview(
         .build()
         .map_err(|e| e.to_string())?;
 
-        // Set as always-on-top of parent briefly, then disable (prevents flash behind)
+        // Keep webview window below the main window in z-order
         let _ = wv_window.set_always_on_top(false);
         
         wm.register(label.clone());
@@ -215,7 +212,6 @@ pub fn spawn_account_webview(
 }
 
 /// Hibernate (destroy) webviews that have been idle for more than `threshold_secs`.
-/// The active webview is never hibernated.
 #[tauri::command]
 pub fn hibernate_inactive(
     app: AppHandle,
@@ -265,10 +261,9 @@ pub fn hide_all_webviews(app: AppHandle, wm: State<'_, WebviewManager>) {
     }
 }
 
-/// Minimize the main window and hide webview windows (Linux/GTK).
+/// Minimize the main window and hide webview windows.
 #[tauri::command]
 pub fn minimize_main_window(app: AppHandle, wm: State<'_, WebviewManager>) {
-    // Hide all webview windows first
     let created = wm.created_webviews.lock().unwrap();
     for label in created.iter() {
         if let Some(wv_window) = app.get_webview_window(label) {
@@ -277,7 +272,6 @@ pub fn minimize_main_window(app: AppHandle, wm: State<'_, WebviewManager>) {
     }
     drop(created);
     
-    // Then minimize the main window
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.minimize();
     }

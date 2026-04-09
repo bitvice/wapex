@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import type { SidebarPosition } from "@/hooks/useSettings";
 
 const SIDEBAR_WIDTH = 64; // w-16 = 4rem = 64px
@@ -59,16 +60,23 @@ export function Viewport({ activeAccountId, account, sidebarPosition }: Viewport
     const onResize = () => syncWebview();
     window.addEventListener("resize", onResize);
 
-    // Listen for main window move events (Tauri API) to reposition the WhatsApp window
+    // Listen for main window move events (Tauri API) to reposition the WebviewWindow
     let unlistenMove: (() => void) | null = null;
     const appWindow = getCurrentWindow();
     appWindow.onMoved(() => {
       syncWebview();
     }).then(fn => { unlistenMove = fn; });
 
+    // Also listen for our custom window-moved event from the Rust side
+    let unlistenCustomMove: (() => void) | null = null;
+    listen("wapex://window-moved", () => {
+      syncWebview();
+    }).then(fn => { unlistenCustomMove = fn; });
+
     return () => {
       window.removeEventListener("resize", onResize);
       if (unlistenMove) unlistenMove();
+      if (unlistenCustomMove) unlistenCustomMove();
     };
   }, [syncWebview]);
 

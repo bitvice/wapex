@@ -2,7 +2,7 @@ pub mod account;
 pub mod commands;
 pub mod storage;
 
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,6 +34,15 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                        // Also show the active webview window
+                        let app = tray.app_handle();
+                        let wm = app.state::<commands::webview_manager::WebviewManager>();
+                        let active = wm.active_label.lock().unwrap().clone();
+                        if let Some(label) = active {
+                            if let Some(wv) = app.get_webview_window(&label) {
+                                let _ = wv.show();
+                            }
+                        }
                     }
                 })
                 .build(app)?;
@@ -46,20 +55,46 @@ pub fn run() {
             }
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Hide all webview windows when main window is closed
+                    let app = window.app_handle();
+                    let wm = app.state::<commands::webview_manager::WebviewManager>();
+                    let created = wm.created_webviews.lock().unwrap();
+                    for label in created.iter() {
+                        if let Some(wv) = app.get_webview_window(label) {
+                            let _ = wv.hide();
+                        }
+                    }
+                    drop(created);
                     let _ = window.hide();
                     api.prevent_close();
                 }
                 tauri::WindowEvent::Focused(focused) => {
-                    // When main window regains focus after being minimized, show webviews
+                    let app = window.app_handle();
+                    let wm = app.state::<commands::webview_manager::WebviewManager>();
+                    let active = wm.active_label.lock().unwrap().clone();
+
                     if *focused {
-                        let app = window.app_handle();
-                        let wm = app.state::<commands::webview_manager::WebviewManager>();
-                        let active = wm.active_label.lock().unwrap().clone();
+                        // When main window regains focus, show the active webview window
                         if let Some(label) = active {
                             if let Some(wv) = app.get_webview_window(&label) {
                                 let _ = wv.show();
                             }
                         }
+                    }
+                    // NOTE: We do NOT hide webview windows when main loses focus.
+                    // This prevents the "webview disappears when alt-tabbing" bug.
+                    // The webview windows are borderless and skip-taskbar, so they
+                    // naturally stay associated with the main window.
+                }
+                tauri::WindowEvent::Moved(_) => {
+                    // Reposition webview windows when main window is moved
+                    let app = window.app_handle();
+                    let wm = app.state::<commands::webview_manager::WebviewManager>();
+                    let active = wm.active_label.lock().unwrap().clone();
+
+                    if active.is_some() {
+                        // Emit a reposition event so the frontend can recalculate bounds
+                        let _ = app.emit("wapex://window-moved", ());
                     }
                 }
                 _ => {}
