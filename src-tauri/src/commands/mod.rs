@@ -2,7 +2,7 @@ pub mod webview_manager;
 
 use crate::account::{get_account_data_dir, Account};
 use crate::storage::AccountManager;
-use tauri::{AppHandle, State, Manager, Emitter, LogicalSize};
+use tauri::{AppHandle, State, Manager, Emitter};
 use webview_manager::WebviewManager;
 
 #[derive(serde::Deserialize, Debug)]
@@ -12,6 +12,8 @@ pub struct Bounds {
     pub width: f64,
     pub height: f64,
 }
+
+
 
 /// Get all managed accounts
 #[tauri::command]
@@ -78,26 +80,24 @@ pub fn proxy_notification(app: AppHandle, title: String, body: String, window_la
     }
 }
 
-/// Resize/reposition a specific WebviewWindow to align with the frontend viewport.
-/// Bounds are RELATIVE to the main window's client area (e.g. x=64 means 64px from left of main window).
 #[tauri::command]
 pub fn update_webview_bounds(app: AppHandle, label: String, bounds: Bounds) -> Result<(), String> {
-    let main_window = app.get_webview_window("main").ok_or("Main window not found")?;
-    let main_pos = main_window.outer_position().map_err(|e| e.to_string())?;
-    
-    // Convert relative bounds to absolute screen coordinates
-    let abs_x = main_pos.x as f64 + bounds.x;
-    let abs_y = main_pos.y as f64 + bounds.y;
-    
     if let Some(wv_window) = app.get_webview_window(&label) {
-        let _ = wv_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(abs_x as i32, abs_y as i32)));
-        let _ = wv_window.set_size(LogicalSize::new(bounds.width, bounds.height));
+        if let Some(main_window) = app.get_webview_window("main") {
+            let main_pos = main_window.outer_position().unwrap_or(tauri::PhysicalPosition::new(0, 0));
+            let scale_factor = main_window.scale_factor().unwrap_or(1.0);
+
+            let abs_x = main_pos.x + (bounds.x * scale_factor) as i32;
+            let abs_y = main_pos.y + (bounds.y * scale_factor) as i32;
+
+            let _ = wv_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(abs_x, abs_y)));
+            let _ = wv_window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(bounds.width, bounds.height)));
+        }
     }
     Ok(())
 }
 
-/// Spawns or restores a WebviewWindow for the specific account using isolated data directory.
-/// Each account gets its own borderless, taskbar-hidden window positioned beside the sidebar.
+/// Spawns a Webview for the specific account as a CHILD of the main window.
 #[tauri::command]
 pub fn spawn_account_webview(
     app: AppHandle, 
@@ -122,9 +122,8 @@ pub fn spawn_account_webview(
         let _ = std::fs::create_dir_all(&account_dir);
         let bridge_script = include_str!("../../../static/bridge.js");
 
-        // Get main window position for absolute coordinate calculation
         let main_window = app.get_webview_window("main").ok_or("Main window not found")?;
-        let main_pos = main_window.outer_position().map_err(|e| e.to_string())?;
+        let main_pos = main_window.outer_position().unwrap_or(tauri::PhysicalPosition::new(0, 0));
 
         let (rel_x, rel_y, w, h) = if let Some(ref b) = bounds {
             (b.x, b.y, b.width, b.height)
@@ -132,26 +131,30 @@ pub fn spawn_account_webview(
             (64.0, 0.0, 736.0, 600.0)
         };
 
-        let abs_x = main_pos.x as f64 + rel_x;
-        let abs_y = main_pos.y as f64 + rel_y;
+        // Convert logical relative bounds to physical absolute screen coordinates
+        let scale_factor = main_window.scale_factor().unwrap_or(1.0);
+        let abs_x = main_pos.x + (rel_x * scale_factor) as i32;
+        let abs_y = main_pos.y + (rel_y * scale_factor) as i32;
+        let phys_w = (w * scale_factor) as u32;
+        let phys_h = (h * scale_factor) as u32;
 
-        println!("[Rust] Spawning WebviewWindow '{}' at screen=({}, {}), size=({}, {})", 
-            label, abs_x, abs_y, w, h);
+        println!("[Rust] Reverting to Multi-Window: Spawning '{}' at screen ({}, {}), size=({}, {})", 
+            label, abs_x, abs_y, phys_w, phys_h);
 
-        // Create a standalone borderless window for this WhatsApp session
         let wv_window = tauri::WebviewWindowBuilder::new(
             &app,
             &label,
             tauri::WebviewUrl::External("https://web.whatsapp.com".parse().unwrap())
         )
-        .title(&format!("WA - {}", account.name))
+        .position(abs_x as f64, abs_y as f64)
         .inner_size(w, h)
-        .position(abs_x, abs_y)
         .decorations(false)
-        .skip_taskbar(true)
+        .always_on_top(false)
         .visible(true)
         .initialization_script(bridge_script)
         .data_directory(account_dir)
+        // CRITICAL: This is what makes Drag-and-Drop work on Linux!
+        .disable_drag_drop_handler() 
         .on_download(|_webview, event| {
             use tauri::webview::DownloadEvent;
             match event {
@@ -195,13 +198,11 @@ pub fn spawn_account_webview(
                 }
                 _ => true,
             }
-        })
-        .build()
-        .map_err(|e| e.to_string())?;
+        });
 
-        // Keep webview window below the main window in z-order
-        let _ = wv_window.set_always_on_top(false);
-        
+        let _wv = wv_window.build()
+            .map_err(|e| e.to_string())?;
+
         wm.register(label.clone());
         wm.show_only(&app, &label);
 
@@ -275,4 +276,105 @@ pub fn minimize_main_window(app: AppHandle, wm: State<'_, WebviewManager>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.minimize();
     }
+}
+
+/// Forward files to the active WhatsApp webview
+#[tauri::command]
+pub fn forward_files_to_webview(app: AppHandle, wm: State<'_, WebviewManager>, payloads: Vec<serde_json::Value>) {
+    println!("DEBUG: forward_files_to_webview invoked with {} files", payloads.len());
+    let active = wm.active_label.lock().unwrap().clone();
+    
+    if let Some(label) = active {
+        if let Some(wv) = app.get_webview_window(&label) {
+            println!("DEBUG: Found webview for label: {}", label);
+            let js = format!(
+                "console.log('WAPEX: Dispatching files from frontend...'); if (window.__wapex_dispatch_files) {{ window.__wapex_dispatch_files({}); }} else {{ console.error('WAPEX: window.__wapex_dispatch_files not found!'); }}", 
+                serde_json::to_string(&payloads).unwrap()
+            );
+            let _ = wv.eval(&js);
+        } else {
+            println!("DEBUG: Webview NOT FOUND for label: {}", label);
+        }
+    }
+}
+
+/// Open WebKit DevTools on the active WhatsApp webview for debugging
+#[tauri::command]
+pub fn open_whatsapp_devtools(app: AppHandle, manager: State<'_, WebviewManager>) -> Result<(), String> {
+    let active = manager.active_label.lock().unwrap().clone();
+    if let Some(label) = active {
+        if let Some(wv) = app.get_webview_window(&label) {
+            wv.open_devtools();
+            return Ok(());
+        }
+    }
+    // Try to find any whatsapp_ webview
+    for (_label, webview) in app.webview_windows() {
+        if _label.starts_with("whatsapp_") {
+            webview.open_devtools();
+            return Ok(());
+        }
+    }
+    Err("No WhatsApp webview found".to_string())
+}
+
+/// Helper to read image directly from OS clipboard to bypass WebKitGTK limitations.
+#[tauri::command]
+pub fn get_clipboard_image() -> Result<String, String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("Clipboard error: {}", e))?;
+    let image = clipboard.get_image().map_err(|e| format!("No image: {}", e))?;
+    
+    let rgba = image::RgbaImage::from_raw(
+        image.width as u32,
+        image.height as u32,
+        image.bytes.into_owned(),
+    ).ok_or("Failed to create RgbaImage")?;
+    
+    let dynamic_image = image::DynamicImage::ImageRgba8(rgba);
+    
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    dynamic_image.write_to(&mut buffer, image::ImageFormat::Png)
+        .map_err(|e| format!("Encode error: {}", e))?;
+        
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::STANDARD.encode(buffer.into_inner()))
+}
+
+/// Re-writes the clipboard image in PNG format and sends a real OS Ctrl+V keypress.
+/// This produces a trusted paste event that WhatsApp Web accepts, bypassing isTrusted checks.
+#[tauri::command]
+pub fn retrigger_paste() -> Result<(), String> {
+    // Re-write the clipboard image to ensure WebKit can read it as image/png
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("Clipboard error: {}", e))?;
+    let image = clipboard.get_image().map_err(|e| format!("No image on clipboard: {}", e))?;
+    clipboard.set_image(arboard::ImageData {
+        width: image.width,
+        height: image.height,
+        bytes: image.bytes,
+    }).map_err(|e| format!("Failed to set clipboard: {}", e))?;
+
+    // Give clipboard time to propagate
+    std::thread::sleep(std::time::Duration::from_millis(80));
+
+    // Try enigo first (works on both X11 and Wayland)
+    let enigo_result = (|| -> Result<(), String> {
+        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("{e}"))?;
+        enigo.key(Key::Control, Direction::Press).map_err(|e| format!("{e}"))?;
+        enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| format!("{e}"))?;
+        enigo.key(Key::Control, Direction::Release).map_err(|e| format!("{e}"))?;
+        Ok(())
+    })();
+
+    if enigo_result.is_err() {
+        // Fallback: xdotool (X11)
+        let xdotool = std::process::Command::new("xdotool")
+            .args(["key", "--clearmodifiers", "ctrl+v"])
+            .status();
+        if xdotool.is_err() {
+            return Err(format!("enigo: {:?}, xdotool not available", enigo_result));
+        }
+    }
+
+    Ok(())
 }

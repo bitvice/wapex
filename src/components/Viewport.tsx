@@ -1,38 +1,30 @@
 import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import type { SidebarPosition } from "@/hooks/useSettings";
-
-const SIDEBAR_WIDTH = 64; // w-16 = 4rem = 64px
-const TITLEBAR_HEIGHT = 32; // h-8 = 2rem = 32px
 
 interface ViewportProps {
   activeAccountId: string | null;
   account: any;
-  sidebarPosition: SidebarPosition;
 }
 
-export function Viewport({ activeAccountId, account, sidebarPosition }: ViewportProps) {
+export function Viewport({ activeAccountId, account }: ViewportProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const spawnedRef = useRef<string | null>(null);
 
   /**
    * Calculate relative bounds (relative to main window's client area).
-   * The Rust backend converts these to absolute screen coordinates.
    */
-  const getBounds = useCallback(() => {
-    return {
-      x: sidebarPosition === "left" ? SIDEBAR_WIDTH : 0,
-      y: TITLEBAR_HEIGHT,
-      width: window.innerWidth - SIDEBAR_WIDTH,
-      height: window.innerHeight - TITLEBAR_HEIGHT,
-    };
-  }, [sidebarPosition]);
-
   const syncWebview = useCallback(async () => {
-    if (!activeAccountId) return;
+    if (!activeAccountId || !containerRef.current) return;
 
-    const bounds = getBounds();
+    const rect = containerRef.current.getBoundingClientRect();
+    const bounds = {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    
     const label = `whatsapp_${activeAccountId.replace(/-/g, "_")}`;
 
     try {
@@ -46,7 +38,7 @@ export function Viewport({ activeAccountId, account, sidebarPosition }: Viewport
     } catch (e) {
       console.error("Failed to sync webview:", e);
     }
-  }, [activeAccountId, account, getBounds]);
+  }, [activeAccountId, account]);
 
   // Spawn/switch on account change
   useEffect(() => {
@@ -55,37 +47,37 @@ export function Viewport({ activeAccountId, account, sidebarPosition }: Viewport
     }
   }, [activeAccountId, account, syncWebview]);
 
-  // Keep bounds in sync with window resizes AND moves
+  // Keep bounds in sync with window resizes and moves
   useEffect(() => {
     const onResize = () => syncWebview();
     window.addEventListener("resize", onResize);
 
-    // Listen for main window move events (Tauri API) to reposition the WebviewWindow
+    // Listen for custom window events from the Rust side
+    let unlistenResize: (() => void) | null = null;
     let unlistenMove: (() => void) | null = null;
-    const appWindow = getCurrentWindow();
-    appWindow.onMoved(() => {
+
+    listen("wapex://window-resized", () => {
+      syncWebview();
+    }).then(fn => { unlistenResize = fn; });
+
+    listen("wapex://window-moved", () => {
       syncWebview();
     }).then(fn => { unlistenMove = fn; });
 
-    // Also listen for our custom window-moved event from the Rust side
-    let unlistenCustomMove: (() => void) | null = null;
-    listen("wapex://window-moved", () => {
-      syncWebview();
-    }).then(fn => { unlistenCustomMove = fn; });
-
     return () => {
       window.removeEventListener("resize", onResize);
+      if (unlistenResize) unlistenResize();
       if (unlistenMove) unlistenMove();
-      if (unlistenCustomMove) unlistenCustomMove();
     };
   }, [syncWebview]);
 
   return (
     <div
+      ref={containerRef}
       className="flex-1 w-full h-full bg-transparent relative"
       id="webview-viewport"
     >
-      {/* Placeholder — the actual content is a separate borderless WebviewWindow */}
+      {/* Placeholder — the actual content is a child Webview managed by Rust */}
     </div>
   );
 }

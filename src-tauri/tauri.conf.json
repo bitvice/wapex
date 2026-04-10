@@ -10,15 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Wapex",
-        "width": 800,
-        "height": 600,
-        "decorations": false,
-        "maximized": true
-      }
-    ],
     "security": {
       "csp": null
     }

@@ -49,6 +49,16 @@ function App() {
 
   useEffect(() => {
     loadAccounts();
+
+    // Prevent default browser behavior globally for drag-and-drop
+    const preventDefault = (e: Event) => e.preventDefault();
+    window.addEventListener("dragover", preventDefault);
+    window.addEventListener("drop", preventDefault);
+
+    return () => {
+      window.removeEventListener("dragover", preventDefault);
+      window.removeEventListener("drop", preventDefault);
+    };
   }, []);
 
   // Hide all WhatsApp windows when returning to the dashboard
@@ -146,7 +156,6 @@ function App() {
           <Viewport 
              activeAccountId={activeAccountId} 
              account={activeAccount}
-             sidebarPosition={sidebarPosition}
           />
         )}
 

@@ -66,6 +66,7 @@ impl WebviewManager {
             if let Some(wv_window) = app.get_webview_window(label) {
                 if label == active_label {
                     let _ = wv_window.show();
+                    let _ = wv_window.set_focus();
                 } else {
                     let _ = wv_window.hide();
                 }

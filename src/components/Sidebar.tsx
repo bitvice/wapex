@@ -1,4 +1,7 @@
 import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
@@ -38,8 +41,71 @@ export function Sidebar({
   onAddAccountClick,
   unreadCounts,
 }: SidebarProps) {
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!isDraggingOver) {
+      console.log("SIDEBAR: Drag Over detected");
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragLeave = () => {
+    console.log("SIDEBAR: Drag Leave detected");
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+
+    try {
+      console.log(`SIDEBAR: Processing ${files.length} dropped files`);
+      const payloads = await Promise.all(
+        Array.from(files).map(async (file) => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve({
+                name: file.name,
+                data: reader.result // includes "data:mimeType;base64," natively
+              });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        })
+      );
+      
+      console.log("SIDEBAR: Forwarding to Rust backend...");
+      await invoke("forward_files_to_webview", { payloads });
+      console.log("SIDEBAR: Forwarded successfully.");
+    } catch (err) {
+      console.error("SIDEBAR: Error processing dropped files:", err);
+    }
+  };
+
   return (
-    <div className="w-16 shrink-0 flex flex-col items-center py-4 bg-card border-r border-border h-full overflow-hidden">
+    <div 
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={cn(
+        "w-16 shrink-0 flex flex-col items-center py-4 bg-card border-r border-border h-full overflow-hidden transition-colors duration-200 relative",
+        isDraggingOver && "bg-primary/5 ring-2 ring-primary/20 ring-inset"
+      )}
+    >
+      {isDraggingOver && (
+        <div className="absolute inset-0 pointer-events-none z-50 flex items-center justify-center p-2 bg-primary/10 rounded-r-lg border-2 border-dashed border-primary animate-in fade-in zoom-in duration-150">
+           <div className="text-[10px] font-bold text-primary uppercase text-center rotate-90 whitespace-nowrap">
+             Drop here to send
+           </div>
+        </div>
+      )}
       {/* App Logo or Main Indicator */}
       <TooltipProvider delayDuration={0}>
         <Tooltip>
